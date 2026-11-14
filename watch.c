@@ -3,8 +3,9 @@
 #include <sys/types.h>
 #include <sys/event.h>
 #include <sys/time.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <sys/uio.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -14,6 +15,8 @@ int main(int argc, char **argv) {
 
     const char *path = ".";
     int watchedfd;
+
+    struct stat fileStats;
 
     // Read and print the file
     ssize_t readReturn;
@@ -33,11 +36,27 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    if (fstat(watchedfd, &fileStats) == -1) {
+        printf("Error getting file stats!\n");
+        printf("errno: %d\n", errno);
+        close(watchedfd);
+        return 1;
+    }
+
+    if (!S_ISREG(fileStats.st_mode)) {
+        printf("File is not a regular file!\n");
+        // printf("errno: %d\n", errno);
+        close(watchedfd);
+        return 1;
+    }
+
+
     int kqueuefd = kqueue();
 
     if (kqueuefd == -1) {
         printf("Creation of kqueue failed!\n");
         printf("errno: %d\n", errno);
+        close(watchedfd);
         return 1;
     }
 
@@ -49,22 +68,37 @@ int main(int argc, char **argv) {
     if (keventResult <= -1) {
         printf("Registration of kevent failed!\n");
         printf("errno: %d\n", errno);
+        close(watchedfd);
+        close(kqueuefd);
         return 1;
     }
 
     while (1) {
         printf("Listening for events, current file: %s\n", path);
-        lseek(watchedfd, 0, SEEK_SET);
+        
+        if (lseek(watchedfd, 0, SEEK_SET) == -1) {
+            printf("Failed to seek to start of file!\n");
+            printf("errno: %d\n", errno);
+            close(watchedfd);
+            close(kqueuefd);
+            return 1;
+        }
 
         while ((readReturn = read(watchedfd, chunk, sizeof chunk)) > 0) {
-            if (readReturn <= -1) {
-                printf("Specified path is not a readable file!");
+            if (write(STDOUT_FILENO, chunk, readReturn) <= -1) {
+                printf("Failed to write to stdout!");
                 printf("errno: %d\n", errno);
+                close(watchedfd);
+                close(kqueuefd);
                 return 1;
             }
-            if (readReturn > 0) {
-                write(STDOUT_FILENO, chunk, readReturn);
-            }
+        }
+        if (readReturn <= -1) {
+            printf("Specified path is not a readable file!");
+            printf("errno: %d\n", errno);
+            close(watchedfd);
+            close(kqueuefd);
+            return 1;
         }
 
         struct kevent occurred;
@@ -74,6 +108,8 @@ int main(int argc, char **argv) {
         if (receivedEventValue <= -1) {
             printf("Receiving of kevent failed!\n");
             printf("errno: %d\n", errno);
+            close(watchedfd);
+            close(kqueuefd);
             return 1;
         }
 
@@ -91,6 +127,12 @@ int main(int argc, char **argv) {
         }
 
     }
+
     close(watchedfd);
+
+    // forgor the queue is an fd too lol
+    close(kqueuefd);
+
+    return 0;
 
 }
