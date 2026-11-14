@@ -36,25 +36,24 @@ int main(int argc, char **argv) {
     int kqueuefd = kqueue();
 
     if (kqueuefd == -1) {
-        printf("Creation of kqueue failed!");
-        printf("errno: %d", errno);
+        printf("Creation of kqueue failed!\n");
+        printf("errno: %d\n", errno);
         return 1;
     }
 
 
     struct kevent vnodekevent;
-    EV_SET(&vnodekevent, watchedfd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, NULL);
+    EV_SET(&vnodekevent, watchedfd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE | NOTE_DELETE | NOTE_RENAME, 0, NULL);
 
     int keventResult = kevent(kqueuefd, &vnodekevent, 1, NULL, 0, NULL);
     if (keventResult <= -1) {
-        printf("Registration of kevent failed!");
-        printf("errno: %d", errno);
+        printf("Registration of kevent failed!\n");
+        printf("errno: %d\n", errno);
         return 1;
     }
 
-    printf("Listening for events\n");
-
     while (1) {
+        printf("Listening for events, current file: %s\n", path);
         lseek(watchedfd, 0, SEEK_SET);
 
         while ((readReturn = read(watchedfd, chunk, sizeof chunk)) > 0) {
@@ -73,14 +72,23 @@ int main(int argc, char **argv) {
 
 
         if (receivedEventValue <= -1) {
-            printf("Receiving of kevent failed!");
-            printf("errno: %d", errno);
+            printf("Receiving of kevent failed!\n");
+            printf("errno: %d\n", errno);
             return 1;
         }
 
-        system("clear");
-
         // printf("%u\n", occurred.fflags);
+
+        // if (occurred.fflags & NOTE_WRITE) {
+        //     printf("The file has been written to!\n");
+        // }
+
+        if ((occurred.fflags & NOTE_DELETE) || (occurred.fflags & NOTE_RENAME)) {
+            printf("\nFile has been deleted or renamed, aborting!\n");
+            break;
+        } else {
+            system("clear");
+        }
 
     }
     close(watchedfd);
